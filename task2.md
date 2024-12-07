@@ -38,8 +38,23 @@
    ```
    
    *Результат:*
-   [Вставьте результат выполнения]
+    ```
+    INFO:  analyzing "public.t_books"
+    INFO:  "t_books": scanned 1225 of 1225 pages, containing 150000 live rows and 3 dead rows; 30000 rows in sample, 150000 estimated total rows
+    INFO:  analyzing "public.t_books_part" inheritance tree
+    INFO:  "t_books_part_1": scanned 408 of 408 pages, containing 49999 live rows and 0 dead rows; 9984 rows in sample, 49999 estimated total rows
+    INFO:  "t_books_part_2": scanned 409 of 409 pages, containing 50000 live rows and 0 dead rows; 10008 rows in sample, 50000 estimated total rows
+    INFO:  "t_books_part_3": scanned 409 of 409 pages, containing 50001 live rows and 0 dead rows; 10008 rows in sample, 50001 estimated total rows
+    INFO:  analyzing "public.t_books_part_1"
+    INFO:  "t_books_part_1": scanned 408 of 408 pages, containing 49999 live rows and 0 dead rows; 30000 rows in sample, 49999 estimated total rows
+    INFO:  analyzing "public.t_books_part_2"
+    INFO:  "t_books_part_2": scanned 409 of 409 pages, containing 50000 live rows and 0 dead rows; 30000 rows in sample, 50000 estimated total rows
+    INFO:  analyzing "public.t_books_part_3"
+    INFO:  "t_books_part_3": scanned 409 of 409 pages, containing 50001 live rows and 0 dead rows; 30000 rows in sample, 50001 estimated total rows
+    ANALYZE
 
+    Query returned successfully in 507 msec.
+    ```
 4. Выполните запрос для поиска книги с id = 18:
    ```sql
    EXPLAIN ANALYZE
@@ -47,10 +62,16 @@
    ```
    
    *План выполнения:*
-   [Вставьте план выполнения]
+   ```
+   "Seq Scan on t_books_part_1 t_books_part  (cost=0.00..1032.99 rows=1 width=32) (actual time=0.021..8.187 rows=1 loops=1)"
+   "  Filter: (book_id = 18)"
+   "  Rows Removed by Filter: 49998"
+   "Planning Time: 1.226 ms"
+   "Execution Time: 8.308 ms"
+   ```
    
    *Объясните результат:*
-   [Ваше объяснение]
+   Последовательное сканирование осуществлялось с помощью последовательного сканирования, но не во всей таблице, а в ее первой партиции, что позволило оптимизировать запрос.
 
 5. Выполните поиск по названию книги:
    ```sql
@@ -60,10 +81,23 @@
    ```
    
    *План выполнения:*
-   [Вставьте план выполнения]
+   ```
+   "Append  (cost=0.00..3101.01 rows=3 width=33) (actual time=6.504..17.035 rows=1 loops=1)"
+   "->  Seq Scan on t_books_part_1  (cost=0.00..1032.99 rows=1 width=32) (actual time=6.503..6.503 rows=1 loops=1)"
+   "Filter: ((title)::text = 'Expert PostgreSQL Architecture'::text)"
+   "Rows Removed by Filter: 49998"
+   "->  Seq Scan on t_books_part_2  (cost=0.00..1034.00 rows=1 width=33) (actual time=4.703..4.703 rows=0 loops=1)"
+   "Filter: ((title)::text = 'Expert PostgreSQL Architecture'::text)"
+   "Rows Removed by Filter: 50000"
+   "->  Seq Scan on t_books_part_3  (cost=0.00..1034.01 rows=1 width=34) (actual time=5.819..5.819 rows=0 loops=1)"
+   "Filter: ((title)::text = 'Expert PostgreSQL Architecture'::text)"
+   "Rows Removed by Filter: 50001"
+   "Planning Time: 0.705 ms"
+   "Execution Time: 17.117 ms"
+   ```
    
    *Объясните результат:*
-   [Ваше объяснение]
+   Видно, что оптимизатор в данном запросе соединил и прошелся по всем трем таблицам-партициям и в них искал последовательным поиском строки, подходящие по критерию. Видно, что он исключил все строки, кроме одной в первой партиции. 
 
 6. Создайте партиционированный индекс:
    ```sql
@@ -71,7 +105,10 @@
    ```
    
    *Результат:*
-   [Вставьте результат выполнения]
+   ```
+   CREATE INDEX
+   Query returned successfully in 225 msec.
+   ``` 
 
 7. Повторите запрос из шага 5:
    ```sql
@@ -81,10 +118,20 @@
    ```
    
    *План выполнения:*
-   [Вставьте план выполнения]
+   ```
+   "Append  (cost=0.29..24.94 rows=3 width=33) (actual time=0.094..0.245 rows=1 loops=1)"
+   "->  Index Scan using t_books_part_1_title_idx on t_books_part_1  (cost=0.29..8.31 rows=1 width=32) (actual time=0.094..0.095 rows=1 loops=1)"
+   "Index Cond: ((title)::text = 'Expert PostgreSQL Architecture'::text)"
+   "->  Index Scan using t_books_part_2_title_idx on t_books_part_2  (cost=0.29..8.31 rows=1 width=33) (actual time=0.061..0.061 rows=0 loops=1)"
+   "Index Cond: ((title)::text = 'Expert PostgreSQL Architecture'::text)"
+   "->  Index Scan using t_books_part_3_title_idx on t_books_part_3  (cost=0.29..8.31 rows=1 width=34) (actual time=0.080..0.080 rows=0 loops=1)"
+   "Index Cond: ((title)::text = 'Expert PostgreSQL Architecture'::text)"
+   "Planning Time: 1.781 ms"
+   "Execution Time: 0.337 ms"
+   ```
    
    *Объясните результат:*
-   [Ваше объяснение]
+   Оптимизатор также проходит а не по самой таблице, а по ее партициям, при этом он использует не последовательный поиск, а индекс, который был создан на основную таблицу, который впоследствии применился и для партиций, следовательно, скорость запроса после создания индекса увеличилась приблизительно в 50 раз.
 
 8. Удалите созданный индекс:
    ```sql
@@ -92,7 +139,11 @@
    ```
    
    *Результат:*
-   [Вставьте результат выполнения]
+   ```
+   DROP INDEX
+   
+   Query returned successfully in 95 msec.
+   ```
 
 9. Создайте индекс для каждой партиции:
    ```sql
@@ -102,7 +153,11 @@
    ```
    
    *Результат:*
-   [Вставьте результат выполнения]
+   ```
+   CREATE INDEX
+
+   Query returned successfully in 244 msec.
+   ```
 
 10. Повторите запрос из шага 5:
     ```sql
@@ -112,10 +167,20 @@
     ```
     
     *План выполнения:*
-    [Вставьте план выполнения]
-    
+    ```
+    "Append  (cost=0.29..24.94 rows=3 width=33) (actual time=0.162..0.378 rows=1 loops=1)"
+    "->  Index Scan using t_books_part_1_title_idx on t_books_part_1  (cost=0.29..8.31 rows=1 width=32) (actual time=0.162..0.163 rows=1 loops=1)"
+    "Index Cond: ((title)::text = 'Expert PostgreSQL Architecture'::text)"
+    "->  Index Scan using t_books_part_2_title_idx on t_books_part_2  (cost=0.29..8.31 rows=1 width=33) (actual time=0.087..0.087 rows=0 loops=1)"
+    "Index Cond: ((title)::text = 'Expert PostgreSQL Architecture'::text)"
+    "->  Index Scan using t_books_part_3_title_idx on t_books_part_3  (cost=0.29..8.31 rows=1 width=34) (actual time=0.118..0.118 rows=0 loops=1)"
+    "Index Cond: ((title)::text = 'Expert PostgreSQL Architecture'::text)"
+    "Planning Time: 2.228 ms"
+    "Execution Time: 0.491 ms"
+    ```
+
     *Объясните результат:*
-    [Ваше объяснение]
+    Аналогично тому, что было в пункте 7.
 
 11. Удалите созданные индексы:
     ```sql
@@ -125,7 +190,11 @@
     ```
     
     *Результат:*
-    [Вставьте результат выполнения]
+    ```
+    DROP INDEX
+
+    Query returned successfully in 116 msec.
+    ```
 
 12. Создайте обычный индекс по book_id:
     ```sql
@@ -133,7 +202,11 @@
     ```
     
     *Результат:*
-    [Вставьте результат выполнения]
+    ```
+    CREATE INDEX
+
+    Query returned successfully in 81 msec.
+    ```
 
 13. Выполните поиск по book_id:
     ```sql
@@ -142,10 +215,15 @@
     ```
     
     *План выполнения:*
-    [Вставьте план выполнения]
+    ```
+    "Index Scan using t_books_part_1_book_id_idx on t_books_part_1 t_books_part  (cost=0.29..8.31 rows=1 width=32) (actual time=0.178..0.187 rows=1 loops=1)"
+    "Index Cond: (book_id = 11011)"
+    "Planning Time: 1.985 ms"
+    "Execution Time: 0.281 ms"
+    ```
     
     *Объясните результат:*
-    [Ваше объяснение]
+    Для начала оптимизатор замечает, что id находится в таблице-партиции под номером 1, следовательно, можно отсечь 2 остальные таблички, и далее фильтровать по 1 партиции. Таким образом, внутри данной таблицы оптимизатор проведет поиск по индексу.
 
 14. Создайте индекс по полю is_active:
     ```sql
@@ -153,8 +231,11 @@
     ```
     
     *Результат:*
-    [Вставьте результат выполнения]
+    ```
+    CREATE INDEX
 
+    Query returned successfully in 111 msec.
+    ```
 15. Выполните поиск активных книг с отключенным последовательным сканированием:
     ```sql
     SET enable_seqscan = off;
@@ -164,10 +245,18 @@
     ```
     
     *План выполнения:*
-    [Вставьте план выполнения]
+    ```
+    "Bitmap Heap Scan on t_books  (cost=840.69..2814.59 rows=74890 width=33) (actual time=2.859..11.833 rows=74839 loops=1)"
+    "Recheck Cond: is_active"
+    "Heap Blocks: exact=1225"
+    "->  Bitmap Index Scan on t_books_active_idx  (cost=0.00..821.97 rows=74890 width=0) (actual time=2.662..2.662 rows=74839 loops=1)"
+    "Index Cond: (is_active = true)"
+    "Planning Time: 0.154 ms"
+    "Execution Time: 14.468 ms"
+    ```
     
     *Объясните результат:*
-    [Ваше объяснение]
+    Сначала оптимизиатор создает карты битов, на основе которой легче осуществлять сканирование таблицы. Далее, по этим битам с помощью индекса происходит сканирование.
 
 16. Создайте составной индекс:
     ```sql
@@ -175,7 +264,11 @@
     ```
     
     *Результат:*
-    [Вставьте результат выполнения]
+    ```
+    CREATE INDEX
+
+    Query returned successfully in 303 msec.
+    ```
 
 17. Найдите максимальное название для каждого автора:
     ```sql
@@ -186,10 +279,17 @@
     ```
     
     *План выполнения:*
-    [Вставьте план выполнения]
+    ```
+    "HashAggregate  (cost=3475.00..3485.01 rows=1001 width=42) (actual time=57.869..57.953 rows=1003 loops=1)"
+    "Group Key: author"
+    "Batches: 1  Memory Usage: 193kB"
+    "->  Seq Scan on t_books  (cost=0.00..2725.00 rows=150000 width=21) (actual time=0.019..10.242 rows=150000 loops=1)"
+    "Planning Time: 0.123 ms"
+    "Execution Time: 58.018 ms"
+    ```
     
     *Объясните результат:*
-    [Ваше объяснение]
+    В данном случае оптимизатор решил, что не использовать индекс будет оптимальнее. Сортировка происходит по столбцу title, поэтому индекс, использующий и title, и author оказался неэффективен. Поэтому оптимизатор использовал здесь HashAggregate - метод агрегации, который использует для этого хэш-таблицы, а далее он выполнил последовательный поиск.
 
 18. Выберите первых 10 авторов:
     ```sql
@@ -201,10 +301,18 @@
     ```
     
     *План выполнения:*
-    [Вставьте план выполнения]
+    ```
+    "Limit  (cost=0.42..56.61 rows=10 width=10) (actual time=0.029..0.385 rows=10 loops=1)"
+    "->  Result  (cost=0.42..5625.42 rows=1001 width=10) (actual time=0.028..0.383 rows=10 loops=1)"
+    "->  Unique  (cost=0.42..5625.42 rows=1001 width=10) (actual time=0.027..0.381 rows=10 loops=1)"
+    "->  Index Only Scan using t_books_author_title_index on t_books  (cost=0.42..5250.42 rows=150000 width=10) (actual time=0.026..0.232 rows=1383 loops=1)"
+    "Heap Fetches: 5"
+    "Planning Time: 0.106 ms"
+    "Execution Time: 0.404 ms"
+    ```
     
     *Объясните результат:*
-    [Ваше объяснение]
+    Вначале задается ограничение на количество строк. Далее, в результате задется ограничение уникальности и проводится поиск с помощью ранее созданного индекса. В ходе фильтрации пришлось найти 5 значений не с помощью индекса. Скорость запроса - средняя.
 
 19. Выполните поиск и сортировку:
     ```sql
@@ -216,10 +324,19 @@
     ```
     
     *План выполнения:*
-    [Вставьте план выполнения]
+    ```
+    "Sort  (cost=3100.29..3100.33 rows=15 width=21) (actual time=35.754..35.762 rows=1 loops=1)"
+    "Sort Key: author, title"
+    "Sort Method: quicksort  Memory: 25kB"
+    "->  Seq Scan on t_books  (cost=0.00..3100.00 rows=15 width=21) (actual time=35.686..35.694 rows=1 loops=1)"
+    "Filter: ((author)::text ~~ 'T%'::text)"
+    "Rows Removed by Filter: 149999"
+    "Planning Time: 1.870 ms"
+    "Execution Time: 35.861 ms"
+    ```
     
     *Объясните результат:*
-    [Ваше объяснение]
+    Вначале оптимизатор прибегает к сортировке с помощью алгоритма "Quicksort", который заключается в определении опорного элемента (середины), от которого отталкивается дальнейшее решение. К сортированным данным применяется проверка по фильтру, в результате которой убираются ненужные строки.
 
 20. Добавьте новую книгу:
     ```sql
@@ -229,7 +346,12 @@
     ```
     
     *Результат:*
-    [Вставьте результат выполнения]
+    ```
+    WARNING:  there is no transaction in progress
+    COMMIT
+
+    Query returned successfully in 92 msec.
+    ```
 
 21. Создайте индекс по категории:
     ```sql
@@ -237,7 +359,11 @@
     ```
     
     *Результат:*
-    [Вставьте результат выполнения]
+    ```
+    CREATE INDEX
+
+    Query returned successfully in 168 msec.
+    ```
 
 22. Найдите книги без категории:
     ```sql
@@ -248,10 +374,15 @@
     ```
     
     *План выполнения:*
-    [Вставьте план выполнения]
+    ```
+    "Index Scan using t_books_cat_idx on t_books  (cost=0.29..8.17 rows=1 width=21) (actual time=0.062..0.070 rows=1 loops=1)"
+    "Index Cond: (category IS NULL)"
+    "Planning Time: 0.684 ms"
+    "Execution Time: 0.129 ms"
+    ```
     
     *Объясните результат:*
-    [Ваше объяснение]
+    Созданный индекс используется в сортировке оптимизатором при запросе, который включает в себя фильтрацию по категории. Таким образом, запрос становится значительно быстрее.
 
 23. Создайте частичные индексы:
     ```sql
@@ -260,7 +391,11 @@
     ```
     
     *Результат:*
-    [Вставьте результат выполнения]
+    ```
+    CREATE INDEX
+
+    Query returned successfully in 102 msec.
+    ```
 
 24. Повторите запрос из шага 22:
     ```sql
@@ -271,10 +406,14 @@
     ```
     
     *План выполнения:*
-    [Вставьте план выполнения]
+    ```
+    "Index Scan using t_books_cat_null_idx on t_books  (cost=0.12..8.00 rows=1 width=21) (actual time=0.038..0.040 rows=1 loops=1)"
+    "Planning Time: 0.636 ms"
+    "Execution Time: 0.087 ms"
+    ```
     
     *Объясните результат:*
-    [Ваше объяснение]
+    Данный запрос использует частичный индекс, и он значительно ускоряет запрос, так как в запросе нам требуется вывести те строки, в которых категория не задана, а данный индекс помогает повысить эффективность сортировки по конкретному значению категории (NULL).
 
 25. Создайте частичный уникальный индекс:
     ```sql
@@ -296,7 +435,25 @@
     ```
     
     *Результат:*
-    [Вставьте результаты всех операций]
+    ```
+    INSERT 0 1
+
+    Query returned successfully in 86 msec.
+    --------
+
+    ERROR:  Key (title)=(Unique Science Book) already exists.duplicate key value violates unique constraint "t_books_selective_unique_idx" 
+
+    ERROR:  duplicate key value violates unique constraint "t_books_selective_unique_idx"
+    SQL state: 23505
+    Detail: Key (title)=(Unique Science Book) already exists.
+    --------
+
+    INSERT 0 1
+
+    Query returned successfully in 73 msec.
+    ```
+
+
     
     *Объясните результат:*
-    [Ваше объяснение]
+    Так как создание индекса вводит новое ограничение на уникальность, то вводится запрет на создание строк с категориями, которые уже существуют.
